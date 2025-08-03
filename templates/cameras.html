@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+
+{% block title %}Câmeras - Sistema RF{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-plus"></i> Nova Câmera</h5>
+            </div>
+            <div class="card-body">
+                <form method="POST">
+                    {{ form.hidden_tag() }}
+                    
+                    <div class="mb-3">
+                        {{ form.name.label(class="form-label") }}
+                        {{ form.name(class="form-control") }}
+                        {% if form.name.errors %}
+                            <div class="text-danger">
+                                {% for error in form.name.errors %}
+                                    <small>{{ error }}</small>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                    </div>
+                    
+                    <div class="mb-3">
+                        {{ form.camera_source.label(class="form-label") }}
+                        {{ form.camera_source(class="form-control") }}
+                        {% if form.camera_source.errors %}
+                            <div class="text-danger">
+                                {% for error in form.camera_source.errors %}
+                                    <small>{{ error }}</small>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                        <small class="form-text text-muted">
+                            Use '0' para webcam padrão, '1' para segunda webcam, ou URL de stream IP.
+                        </small>
+                    </div>
+                    
+                    <div class="mb-3">
+                        {{ form.establishment_id.label(class="form-label") }}
+                        {{ form.establishment_id(class="form-select") }}
+                        {% if form.establishment_id.errors %}
+                            <div class="text-danger">
+                                {% for error in form.establishment_id.errors %}
+                                    <small>{{ error }}</small>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                    </div>
+                    
+                    <div class="d-grid">
+                        {{ form.submit(class="btn btn-primary") }}
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-video"></i> Minhas Câmeras</h5>
+            </div>
+            <div class="card-body">
+                {% if cameras %}
+                    <div class="table-responsive">
+                        <table class="table table-dark table-striped">
+                            <thead>
+                                <tr>
+                                    <th>Nome</th>
+                                    <th>Estabelecimento</th>
+                                    <th>Fonte</th>
+                                    <th>Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for camera in cameras %}
+                                    <tr>
+                                        <td>{{ camera.name }}</td>
+                                        <td>{{ camera.establishment.name }}</td>
+                                        <td>
+                                            <code>{{ camera.camera_source }}</code>
+                                        </td>
+                                        <td>
+                                            <a href="{{ url_for('edit_camera', id=camera.id) }}" 
+                                               class="btn btn-sm btn-outline-warning">
+                                                <i class="fas fa-edit"></i>
+                                            </a>
+                                            <a href="{{ url_for('delete_camera', id=camera.id) }}" 
+                                               class="btn btn-sm btn-outline-danger"
+                                               onclick="return confirm('Tem certeza que deseja excluir esta câmera?')">
+                                                <i class="fas fa-trash"></i>
+                                            </a>
+                                        </td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <p class="text-muted text-center">Nenhuma câmera cadastrada.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

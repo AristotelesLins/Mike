@@ -1,0 +1,658 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Sistema RF{% endblock %}
+
+{% block content %}
+<!-- Estatísticas rápidas -->
+{% if stats %}
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card bg-primary">
+            <div class="card-body text-center">
+                <h3 id="total-faces">{{ stats.total_faces }}</h3>
+                <p class="mb-0">Total de Rostos</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card bg-success">
+            <div class="card-body text-center">
+                <h3 id="known-faces">{{ stats.known_faces }}</h3>
+                <p class="mb-0">Identificados</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card bg-warning">
+            <div class="card-body text-center">
+                <h3 id="unknown-faces">{{ stats.unknown_faces }}</h3>
+                <p class="mb-0">Desconhecidos</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card bg-info">
+            <div class="card-body text-center">
+                <h3 id="recent-sightings">{{ stats.recent_sightings }}</h3>
+                <p class="mb-0">Últimas 24h</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<div class="row">
+    <!-- Sidebar com estabelecimentos -->
+    <div class="col-md-3">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-building"></i> Estabelecimentos</h5>
+            </div>
+            <div class="card-body">
+                {% if establishments.items %}
+                    {% for establishment in establishments.items %}
+                        <div class="mb-2">
+                            <a href="{{ url_for('dashboard', establishment=establishment.id) }}" 
+                               class="btn btn-outline-primary w-100 {% if selected_establishment and selected_establishment.id == establishment.id %}active{% endif %}">
+                                {{ establishment.name }}
+                                <span class="badge bg-secondary ms-1">{{ establishment.cameras|length }}</span>
+                            </a>
+                        </div>
+                    {% endfor %}
+                    
+                    <!-- Paginação -->
+                    {% if establishments.pages > 1 %}
+                        <nav aria-label="Navegação dos estabelecimentos">
+                            <ul class="pagination pagination-sm justify-content-center mt-3">
+                                {% if establishments.has_prev %}
+                                    <li class="page-item">
+                                        <a class="page-link" href="{{ url_for('dashboard', page=establishments.prev_num) }}">
+                                            <span aria-hidden="true">&laquo;</span>
+                                        </a>
+                                    </li>
+                                {% endif %}
+                                
+                                {% for page_num in establishments.iter_pages() %}
+                                    {% if page_num %}
+                                        {% if page_num != establishments.page %}
+                                            <li class="page-item">
+                                                <a class="page-link" href="{{ url_for('dashboard', page=page_num) }}">{{ page_num }}</a>
+                                            </li>
+                                        {% else %}
+                                            <li class="page-item active">
+                                                <span class="page-link">{{ page_num }}</span>
+                                            </li>
+                                        {% endif %}
+                                    {% else %}
+                                        <li class="page-item disabled">
+                                            <span class="page-link">…</span>
+                                        </li>
+                                    {% endif %}
+                                {% endfor %}
+                                
+                                {% if establishments.has_next %}
+                                    <li class="page-item">
+                                        <a class="page-link" href="{{ url_for('dashboard', page=establishments.next_num) }}">
+                                            <span aria-hidden="true">&raquo;</span>
+                                        </a>
+                                    </li>
+                                {% endif %}
+                            </ul>
+                        </nav>
+                    {% endif %}
+                {% else %}
+                    <p class="text-muted">Nenhum estabelecimento cadastrado.</p>
+                    <a href="{{ url_for('manage_establishments') }}" class="btn btn-primary btn-sm">
+                        <i class="fas fa-plus"></i> Adicionar
+                    </a>
+                {% endif %}
+            </div>
+        </div>
+        
+        <!-- Controle de Câmeras -->
+        {% if cameras %}
+        <div class="card mt-3">
+            <div class="card-header">
+                <h6><i class="fas fa-video"></i> Controle Geral</h6>
+            </div>
+            <div class="card-body">
+                <button id="start-all-cameras" class="btn btn-success btn-sm w-100 mb-2">
+                    <i class="fas fa-play"></i> Iniciar Todas
+                </button>
+                <button id="stop-all-cameras" class="btn btn-danger btn-sm w-100">
+                    <i class="fas fa-stop"></i> Parar Todas
+                </button>
+                <div class="mt-2">
+                    <small class="text-muted">Câmeras ativas: <span id="active-count">0</span></small>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+    
+    <!-- Área principal das câmeras -->
+    <div class="col-md-9">
+        {% if selected_establishment %}
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5><i class="fas fa-video"></i> Câmeras - {{ selected_establishment.name }}</h5>
+                    <div class="btn-group btn-group-sm">
+                        <button id="grid-2x2" class="btn btn-outline-secondary" title="Grade 2x2">
+                            <i class="fas fa-th"></i>
+                        </button>
+                        <button id="grid-3x3" class="btn btn-outline-secondary active" title="Grade 3x3">
+                            <i class="fas fa-th-large"></i>
+                        </button>
+                        <button id="grid-list" class="btn btn-outline-secondary" title="Lista">
+                            <i class="fas fa-list"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    {% if cameras %}
+                        <div class="row" id="cameras-container">
+                            {% for camera in cameras %}
+                                <div class="col-lg-6 col-xl-4 mb-3 camera-grid-item">
+                                    <div class="video-container" id="camera-container-{{ camera.id }}">
+                                        <img id="video-feed-{{ camera.id }}" 
+                                             src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='300'%3E%3Crect width='100%25' height='100%25' fill='%23333'/%3E%3Ctext x='50%25' y='50%25' text-anchor='middle' dy='.3em' fill='white'%3ECarregando...%3C/text%3E%3C/svg%3E"
+                                             class="video-feed" 
+                                             alt="Feed da câmera {{ camera.name }}">
+                                        
+                                        <div class="camera-controls">
+                                            <button class="btn btn-sm btn-success start-camera" data-camera-id="{{ camera.id }}" title="Iniciar">
+                                                <i class="fas fa-play"></i>
+                                            </button>
+                                            <button class="btn btn-sm btn-danger stop-camera" data-camera-id="{{ camera.id }}" style="display: none;" title="Parar">
+                                                <i class="fas fa-stop"></i>
+                                            </button>
+                                            <button class="btn btn-sm btn-info expand-camera" data-camera-id="{{ camera.id }}" title="Expandir">
+                                                <i class="fas fa-expand"></i>
+                                            </button>
+                                        </div>
+                                        
+                                        <div class="camera-title">
+                                            <strong>{{ camera.name }}</strong>
+                                            <div class="status-indicator" id="status-{{ camera.id }}">
+                                                <span class="badge bg-secondary">Parada</span>
+                                            </div>
+                                            <div class="detected-faces" id="faces-{{ camera.id }}"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <div class="text-center">
+                            <i class="fas fa-video-slash fa-3x text-muted mb-3"></i>
+                            <p class="text-muted">Nenhuma câmera cadastrada para este estabelecimento.</p>
+                            <a href="{{ url_for('manage_cameras') }}" class="btn btn-primary">
+                                <i class="fas fa-plus"></i> Adicionar Câmera
+                            </a>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        {% else %}
+            <div class="card">
+                <div class="card-body text-center">
+                    <i class="fas fa-eye fa-3x text-primary mb-3"></i>
+                    <h5>Bem-vindo ao Sistema de Reconhecimento Facial</h5>
+                    <p class="text-muted">Selecione um estabelecimento ou crie um novo para começar.</p>
+                    <a href="{{ url_for('manage_establishments') }}" class="btn btn-primary">
+                        <i class="fas fa-plus"></i> Criar Estabelecimento
+                    </a>
+                </div>
+            </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Modal para câmera expandida -->
+<div class="modal fade" id="expandedCameraModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content bg-dark">
+            <div class="modal-header">
+                <h5 class="modal-title" id="expandedCameraTitle">Câmera Expandida</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body text-center">
+                <img id="expandedVideoFeed" src="" class="img-fluid" alt="Feed expandido">
+                <div id="expandedFaces" class="mt-2"></div>
+                <div class="mt-2">
+                    <small class="text-muted">Pressione ESC para fechar</small>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal de notificações -->
+<div class="modal fade" id="notificationModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content bg-dark">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="fas fa-user-check text-success"></i> Rosto Detectado
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="notificationBody">
+                <!-- Conteúdo da notificação -->
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{% if cameras %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    let socket = null;
+    let activeCameras = new Set();
+    let expandedCamera = null;
+    let statsUpdateInterval = null;
+    
+    // Inicializa Socket.IO
+    socket = io.connect('http://' + document.domain + ':' + location.port);
+        
+        socket.on('connect', function() {
+            console.log('✓ Conectado ao servidor!');
+            showToast('Conectado ao servidor', 'success');
+        });
+        
+        socket.on('disconnect', function() {
+            console.log('❌ Desconectado do servidor');
+            showToast('Desconectado do servidor', 'error');
+        });
+        
+        socket.on('error', function(data) {
+            console.error('Erro Socket.IO:', data.message);
+            showToast('Erro: ' + data.message, 'error');
+        });
+        
+        socket.on('processed_frame', function(data) {
+            const cameraId = data.camera_id;
+            const img = document.getElementById('video-feed-' + cameraId);
+            const facesDiv = document.getElementById('faces-' + cameraId);
+            const statusDiv = document.getElementById('status-' + cameraId);
+            
+            if (img) {
+                img.src = 'data:image/jpeg;base64,' + data.image;
+            }
+            
+            if (statusDiv) {
+                statusDiv.innerHTML = `<span class="badge bg-success">Ativa (${data.face_count || 0} rostos)</span>`;
+            }
+            
+            if (facesDiv && data.faces && data.faces.length > 0) {
+                const facesList = data.faces.map(face => 
+                    `<span class="badge ${face.startsWith('Desconhecido') ? 'bg-warning' : 'bg-success'} me-1">${face}</span>`
+                ).join('');
+                facesDiv.innerHTML = '<small>' + facesList + '</small>';
+            } else if (facesDiv) {
+                facesDiv.innerHTML = '';
+            }
+            
+            // Atualiza câmera expandida se estiver ativa
+            if (expandedCamera === cameraId) {
+                const expandedImg = document.getElementById('expandedVideoFeed');
+                const expandedFaces = document.getElementById('expandedFaces');
+                
+                if (expandedImg) {
+                    expandedImg.src = 'data:image/jpeg;base64,' + data.image;
+                }
+                
+                if (expandedFaces && data.faces && data.faces.length > 0) {
+                    const facesList = data.faces.map(face => 
+                        `<span class="badge ${face.startsWith('Desconhecido') ? 'bg-warning' : 'bg-success'} me-2">${face}</span>`
+                    ).join('');
+                    expandedFaces.innerHTML = '<div class="alert alert-info">Rostos detectados: ' + facesList + '</div>';
+                } else if (expandedFaces) {
+                    expandedFaces.innerHTML = '';
+                }
+            }
+        });
+        
+        socket.on('face_detected', function(data) {
+            // Notificação de rosto detectado
+            playNotificationSound();
+            showFaceDetectionNotification(data);
+        });
+        
+        socket.on('camera_started', function(data) {
+            console.log('Câmera iniciada:', data.camera_id);
+            showToast('Câmera ' + (data.camera_name || data.camera_id) + ' iniciada', 'success');
+        });
+        
+        socket.on('camera_stopped', function(data) {
+            console.log('Câmera parada:', data.camera_id);
+            showToast('Câmera parada', 'info');
+            
+            // Atualiza status
+            const statusDiv = document.getElementById('status-' + data.camera_id);
+            if (statusDiv) {
+                statusDiv.innerHTML = '<span class="badge bg-secondary">Parada</span>';
+            }
+        });
+        
+        socket.on('stats_update', function(data) {
+            updateStats(data);
+        });
+        
+        // Atualiza estatísticas periodicamente
+        statsUpdateInterval = setInterval(function() {
+            fetch('/api/stats')
+                .then(response => response.json())
+                .then(data => updateStats(data))
+                .catch(error => console.error('Erro ao buscar estatísticas:', error));
+        }, 10000); // A cada 10 segundos
+    
+    // Funções de controle das câmeras
+    document.querySelectorAll('.start-camera').forEach(button => {
+        button.addEventListener('click', function() {
+            const cameraId = this.dataset.cameraId;
+            startCamera(cameraId);
+        });
+    });
+    
+    document.querySelectorAll('.stop-camera').forEach(button => {
+        button.addEventListener('click', function() {
+            const cameraId = this.dataset.cameraId;
+            stopCamera(cameraId);
+        });
+    });
+    
+    document.querySelectorAll('.expand-camera').forEach(button => {
+        button.addEventListener('click', function() {
+            const cameraId = this.dataset.cameraId;
+            expandCamera(cameraId);
+        });
+    });
+    
+    // Controles gerais
+    const startAllBtn = document.getElementById('start-all-cameras');
+    const stopAllBtn = document.getElementById('stop-all-cameras');
+    
+    if (startAllBtn) {
+        startAllBtn.addEventListener('click', function() {
+            document.querySelectorAll('.start-camera:not([style*="display: none"])').forEach(btn => {
+                btn.click();
+            });
+        });
+    }
+    
+    if (stopAllBtn) {
+        stopAllBtn.addEventListener('click', function() {
+            document.querySelectorAll('.stop-camera:not([style*="display: none"])').forEach(btn => {
+                btn.click();
+            });
+        });
+    }
+    
+    function startCamera(cameraId) {
+        if (!socket) return;
+        
+        activeCameras.add(cameraId);
+        socket.emit('start_camera', {camera_id: parseInt(cameraId)});
+        
+        // Atualiza interface
+        const startBtn = document.querySelector(`.start-camera[data-camera-id="${cameraId}"]`);
+        const stopBtn = document.querySelector(`.stop-camera[data-camera-id="${cameraId}"]`);
+        const statusDiv = document.getElementById('status-' + cameraId);
+        
+        if (startBtn) startBtn.style.display = 'none';
+        if (stopBtn) stopBtn.style.display = 'inline-block';
+        if (statusDiv) statusDiv.innerHTML = '<span class="badge bg-warning">Iniciando...</span>';
+        
+        updateActiveCount();
+    }
+    
+    function stopCamera(cameraId) {
+        if (!socket) return;
+        
+        activeCameras.delete(cameraId);
+        socket.emit('stop_camera', {camera_id: parseInt(cameraId)});
+        
+        // Atualiza interface
+        const startBtn = document.querySelector(`.start-camera[data-camera-id="${cameraId}"]`);
+        const stopBtn = document.querySelector(`.stop-camera[data-camera-id="${cameraId}"]`);
+        const statusDiv = document.getElementById('status-' + cameraId);
+        
+        if (startBtn) startBtn.style.display = 'inline-block';
+        if (stopBtn) stopBtn.style.display = 'none';
+        if (statusDiv) statusDiv.innerHTML = '<span class="badge bg-secondary">Parada</span>';
+        
+        // Limpa o feed
+        const img = document.getElementById('video-feed-' + cameraId);
+        if (img) {
+            img.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='300'%3E%3Crect width='100%25' height='100%25' fill='%23333'/%3E%3Ctext x='50%25' y='50%25' text-anchor='middle' dy='.3em' fill='white'%3EParado%3C/text%3E%3C/svg%3E";
+        }
+        
+        updateActiveCount();
+    }
+    
+    function expandCamera(cameraId) {
+        expandedCamera = parseInt(cameraId);
+        
+        // Busca o nome da câmera
+        const container = document.getElementById('camera-container-' + cameraId);
+        const title = container ? container.querySelector('.camera-title strong').textContent : 'Câmera';
+        
+        // Atualiza modal
+        document.getElementById('expandedCameraTitle').textContent = title;
+        
+        // Copia a imagem atual
+        const currentImg = document.getElementById('video-feed-' + cameraId);
+        const expandedImg = document.getElementById('expandedVideoFeed');
+        if (currentImg && expandedImg) {
+            expandedImg.src = currentImg.src;
+        }
+        
+        // Abre modal
+        const modal = new bootstrap.Modal(document.getElementById('expandedCameraModal'));
+        modal.show();
+    }
+    
+    function setGridLayout(layout) {
+        const container = document.getElementById('cameras-container');
+        const items = container.querySelectorAll('.camera-grid-item');
+        
+        items.forEach(item => {
+            item.className = 'camera-grid-item mb-3';
+            
+            switch(layout) {
+                case '2x2':
+                    item.classList.add('col-md-6');
+                    break;
+                case '3x3':
+                    item.classList.add('col-lg-6', 'col-xl-4');
+                    break;
+                case 'list':
+                    item.classList.add('col-12');
+                    break;
+            }
+        });
+    }
+    
+    function updateActiveGridButton(activeBtn) {
+        document.querySelectorAll('#grid-2x2, #grid-3x3, #grid-list').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        activeBtn.classList.add('active');
+    }
+    
+    function updateActiveCount() {
+        const countElement = document.getElementById('active-count');
+        if (countElement) {
+            countElement.textContent = activeCameras.size;
+        }
+    }
+    
+    function updateStats(data) {
+        const elements = {
+            'total-faces': data.total_faces,
+            'known-faces': data.known_faces,
+            'unknown-faces': data.unknown_faces,
+            'recent-sightings': data.recent_sightings
+        };
+        
+        Object.entries(elements).forEach(([id, value]) => {
+            const element = document.getElementById(id);
+            if (element) {
+                element.textContent = value || 0;
+            }
+        });
+    }
+    
+    function showToast(message, type = 'info') {
+        // Cria toast simples
+        const toast = document.createElement('div');
+        toast.className = `alert alert-${type === 'error' ? 'danger' : type} alert-dismissible fade show position-fixed`;
+        toast.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+        toast.innerHTML = `
+            ${message}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        `;
+        
+        document.body.appendChild(toast);
+        
+        // Remove automaticamente
+        setTimeout(() => {
+            if (toast.parentNode) {
+                toast.remove();
+            }
+        }, 5000);
+    }
+    
+    function showFaceDetectionNotification(data) {
+        const modalBody = document.getElementById('notificationBody');
+        const facesList = data.faces.map(face => 
+            `<span class="badge ${face.startsWith('Desconhecido') ? 'bg-warning' : 'bg-success'} me-1">${face}</span>`
+        ).join('');
+        
+        modalBody.innerHTML = `
+            <p><strong>Câmera:</strong> ${data.camera_name}</p>
+            <p><strong>Local:</strong> ${data.establishment_name}</p>
+            <p><strong>Rostos detectados:</strong><br>${facesList}</p>
+            <p><small class="text-muted">Detectado em: ${new Date(data.timestamp).toLocaleString()}</small></p>
+        `;
+        
+        const modal = new bootstrap.Modal(document.getElementById('notificationModal'));
+        modal.show();
+        
+        // Auto-fecha em 5 segundos
+        setTimeout(() => {
+            modal.hide();
+        }, 5000);
+    }
+    
+    function playNotificationSound() {
+        // Som de notificação simples
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+        
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        
+        oscillator.frequency.value = 800;
+        oscillator.type = 'sine';
+        
+        gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+        
+        oscillator.start(audioContext.currentTime);
+        oscillator.stop(audioContext.currentTime + 0.5);
+    }
+    
+    // Limpa câmera expandida quando modal fecha
+    document.getElementById('expandedCameraModal').addEventListener('hidden.bs.modal', function() {
+        expandedCamera = null;
+    });
+    
+    // Atalho ESC para fechar modal expandido
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && expandedCamera !== null) {
+            const modal = bootstrap.Modal.getInstance(document.getElementById('expandedCameraModal'));
+            if (modal) {
+                modal.hide();
+            }
+        }
+    });
+    
+    // Cleanup ao sair da página
+    window.addEventListener('beforeunload', function() {
+        if (statsUpdateInterval) {
+            clearInterval(statsUpdateInterval);
+        }
+        if (socket) {
+            socket.disconnect();
+        }
+    });
+});
+</script>
+{% endif %}
+
+<script>
+// Funções que sempre existem, independente de haver câmeras
+document.addEventListener('DOMContentLoaded', function() {
+    // Controles de layout (sempre disponíveis)
+    const grid2x2 = document.getElementById('grid-2x2');
+    const grid3x3 = document.getElementById('grid-3x3');
+    const gridList = document.getElementById('grid-list');
+    
+    if (grid2x2) {
+        grid2x2.addEventListener('click', function() {
+            setGridLayout('2x2');
+            updateActiveGridButton(this);
+        });
+    }
+    
+    if (grid3x3) {
+        grid3x3.addEventListener('click', function() {
+            setGridLayout('3x3');
+            updateActiveGridButton(this);
+        });
+    }
+    
+    if (gridList) {
+        gridList.addEventListener('click', function() {
+            setGridLayout('list');
+            updateActiveGridButton(this);
+        });
+    }
+    
+    function setGridLayout(layout) {
+        const container = document.getElementById('cameras-container');
+        if (!container) return;
+        
+        const items = container.querySelectorAll('.camera-grid-item');
+        
+        items.forEach(item => {
+            item.className = 'camera-grid-item mb-3';
+            
+            switch(layout) {
+                case '2x2':
+                    item.classList.add('col-md-6');
+                    break;
+                case '3x3':
+                    item.classList.add('col-lg-6', 'col-xl-4');
+                    break;
+                case 'list':
+                    item.classList.add('col-12');
+                    break;
+            }
+        });
+    }
+    
+    function updateActiveGridButton(activeBtn) {
+        document.querySelectorAll('#grid-2x2, #grid-3x3, #grid-list').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        activeBtn.classList.add('active');
+    }
+});
+</script>
+{% endblock %}

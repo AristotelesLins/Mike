@@ -1,0 +1,212 @@
+{% extends "base.html" %}
+
+{% block title %}Rostos - Sistema RF{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-plus"></i> Cadastrar Rosto</h5>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label for="camera-select" class="form-label">Câmera para Captura</label>
+                    <select id="camera-select" class="form-select">
+                        <option value="">Selecione uma câmera</option>
+                        {% for choice in form.camera_id.choices %}
+                            <option value="{{ choice[0] }}">{{ choice[1] }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                
+                <div class="d-grid mb-3">
+                    <button id="capture-btn" class="btn btn-warning" disabled>
+                        <i class="fas fa-camera"></i> Capturar Rosto
+                    </button>
+                </div>
+                
+                <div id="capture-preview" style="display: none;">
+                    <img id="captured-image" src="" class="img-fluid mb-3" alt="Rosto capturado">
+                    
+                    <div class="mb-3">
+                        <label for="face-name" class="form-label">Nome da Pessoa</label>
+                        <input type="text" id="face-name" class="form-control" placeholder="Digite o nome...">
+                    </div>
+                    
+                    <div class="d-grid gap-2">
+                        <button id="register-btn" class="btn btn-success">
+                            <i class="fas fa-save"></i> Cadastrar
+                        </button>
+                        <button id="cancel-btn" class="btn btn-secondary">
+                            <i class="fas fa-times"></i> Cancelar
+                        </button>
+                    </div>
+                </div>
+                
+                <div id="capture-message"></div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-user-friends"></i> Rostos Cadastrados</h5>
+            </div>
+            <div class="card-body">
+                {% if faces %}
+                    <div class="table-responsive">
+                        <table class="table table-dark table-striped">
+                            <thead>
+                                <tr>
+                                    <th>Nome</th>
+                                    <th>Data Cadastro</th>
+                                    <th>Avistamentos</th>
+                                    <th>Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for face in faces %}
+                                    <tr>
+                                        <td>
+                                            {{ face.name }}
+                                            {% if face.name.startswith('Desconhecido_') %}
+                                                <span class="badge bg-warning">Não identificado</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>{{ moment(face.sightings[0].timestamp).format('DD/MM/YYYY HH:mm') if face.sightings else 'N/A' }}</td>
+                                        <td>
+                                            <span class="badge bg-info">{{ face.sightings|length }}</span>
+                                        </td>
+                                        <td>
+                                            <a href="{{ url_for('delete_face', id=face.id) }}" 
+                                               class="btn btn-sm btn-outline-danger"
+                                               onclick="return confirm('Tem certeza que deseja excluir este rosto?')">
+                                                <i class="fas fa-trash"></i>
+                                            </a>
+                                        </td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <p class="text-muted text-center">Nenhum rosto cadastrado ainda.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const cameraSelect = document.getElementById('camera-select');
+    const captureBtn = document.getElementById('capture-btn');
+    const capturePreview = document.getElementById('capture-preview');
+    const capturedImage = document.getElementById('captured-image');
+    const faceNameInput = document.getElementById('face-name');
+    const registerBtn = document.getElementById('register-btn');
+    const cancelBtn = document.getElementById('cancel-btn');
+    const messageDiv = document.getElementById('capture-message');
+    
+    let currentCacheKey = null;  // Armazena a chave do cache
+    
+    // Habilita botão de captura quando câmera é selecionada
+    cameraSelect.addEventListener('change', function() {
+        captureBtn.disabled = !this.value;
+    });
+    
+    // Captura rosto
+    captureBtn.addEventListener('click', function() {
+        const cameraId = cameraSelect.value;
+        if (!cameraId) return;
+        
+        // Mostra loading
+        messageDiv.innerHTML = '<div class="alert alert-info">Capturando rosto...</div>';
+        captureBtn.disabled = true;
+        
+        fetch('/faces/capture', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({camera_id: parseInt(cameraId)})
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                // Armazena a chave do cache
+                currentCacheKey = data.cache_key;
+                // Mostra preview
+                capturedImage.src = 'data:image/jpeg;base64,' + data.frame;
+                capturePreview.style.display = 'block';
+                messageDiv.innerHTML = '<div class="alert alert-success">' + data.message + '</div>';
+            } else {
+                messageDiv.innerHTML = '<div class="alert alert-danger">' + data.message + '</div>';
+            }
+        })
+        .catch(error => {
+            messageDiv.innerHTML = '<div class="alert alert-danger">Erro ao capturar rosto: ' + error.message + '</div>';
+        })
+        .finally(() => {
+            captureBtn.disabled = false;
+        });
+    });
+    
+    // Registra rosto
+    registerBtn.addEventListener('click', function() {
+        const name = faceNameInput.value.trim();
+        if (!name) {
+            alert('Digite um nome para a pessoa');
+            return;
+        }
+        
+        if (!currentCacheKey) {
+            alert('Nenhum rosto foi capturado. Capture um rosto primeiro.');
+            return;
+        }
+        
+        registerBtn.disabled = true;
+        messageDiv.innerHTML = '<div class="alert alert-info">Cadastrando rosto...</div>';
+        
+        fetch('/faces/register', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                name: name,
+                cache_key: currentCacheKey
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                messageDiv.innerHTML = '<div class="alert alert-success">' + data.message + '</div>';
+                // Recarrega a página após sucesso
+                setTimeout(() => location.reload(), 2000);
+            } else {
+                messageDiv.innerHTML = '<div class="alert alert-danger">' + data.message + '</div>';
+            }
+        })
+        .catch(error => {
+            messageDiv.innerHTML = '<div class="alert alert-danger">Erro ao cadastrar rosto: ' + error.message + '</div>';
+        })
+        .finally(() => {
+            registerBtn.disabled = false;
+        });
+    });
+    
+    // Cancela captura
+    cancelBtn.addEventListener('click', function() {
+        capturePreview.style.display = 'none';
+        faceNameInput.value = '';
+        messageDiv.innerHTML = '';
+        currentCacheKey = null;  // Limpa a chave do cache
+    });
+});
+</script>
+{% endblock %}
