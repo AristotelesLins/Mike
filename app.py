@@ -444,8 +444,8 @@ def handle_stream(data):
         # Processa frame
         processed_frame, face_names, face_ids = engine.process_frame(frame, camera_id)
         
-        # Codifica frame processado
-        _, buffer = cv2.imencode('.jpg', processed_frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
+        # Codifica frame processado com qualidade otimizada
+        _, buffer = cv2.imencode('.jpg', processed_frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
         processed_image_data = base64.b64encode(buffer).decode('utf-8')
         
         # Atualiza info da câmera ativa
@@ -599,16 +599,19 @@ def stream_camera(camera_id, user_id):
             # Configurações específicas para streams HTTP/MJPEG
             if isinstance(source, str) and source.startswith('http'):
                 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Buffer mínimo para reduzir latência
-                cap.set(cv2.CAP_PROP_FPS, 10)  # FPS mais baixo para estabilidade
+                cap.set(cv2.CAP_PROP_FPS, 25)  # 25 FPS para streams HTTP (mais estável)
+            else:
+                # Configurações para câmeras locais
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Buffer mínimo também para locais
             
             if not cap.isOpened():
                 print(f"Erro: Não foi possível abrir a câmera {source}")
                 return
             
-            # Configura a câmera
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-            cap.set(cv2.CAP_PROP_FPS, 15)
+            # Configura a câmera com resolução otimizada para fluidez
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)  # Resolução equilibrada
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)  # Resolução equilibrada
+            cap.set(cv2.CAP_PROP_FPS, 25)
             
             # Obtém engine de reconhecimento facial
             if user_id not in face_engines:
@@ -618,6 +621,54 @@ def stream_camera(camera_id, user_id):
             frame_count = 0
             consecutive_failures = 0
             max_failures = 3
+            
+            # Sistema de threading para processamento paralelo
+            latest_frame = None
+            latest_detections = {'faces': [], 'ids': [], 'locations': []}
+            frame_lock = threading.Lock()
+            processing_active = True
+            
+            def face_detection_worker():
+                """Worker thread para processar detecção de rostos em paralelo"""
+                nonlocal latest_frame, latest_detections, processing_active
+                
+                while processing_active and camera_id in active_cameras:
+                    try:
+                        with frame_lock:
+                            current_frame = latest_frame.copy() if latest_frame is not None else None
+                        
+                        if current_frame is not None:
+                            # Usa o engine diretamente para processar o frame
+                            # Isso garante que toda a lógica de identificação funcione
+                            processed_frame, face_names, face_ids = engine.process_frame(current_frame, camera_id)
+                            
+                            # Extrai as localizações dos rostos se disponível
+                            face_locations = []
+                            if hasattr(engine, 'last_face_locations') and engine.last_face_locations:
+                                face_locations = engine.last_face_locations.copy()
+                            else:
+                                # Fallback: detecta localizações básicas
+                                small_frame = cv2.resize(current_frame, (0, 0), fx=0.25, fy=0.25)
+                                rgb_small_frame = small_frame[:, :, ::-1]
+                                locations = face_recognition.face_locations(rgb_small_frame)
+                                # Escala de volta para tamanho original
+                                face_locations = [(top*4, right*4, bottom*4, left*4) 
+                                                for top, right, bottom, left in locations]
+                            
+                            # Atualiza detecções thread-safe
+                            with frame_lock:
+                                latest_detections['faces'] = face_names.copy()
+                                latest_detections['ids'] = face_ids.copy()
+                                latest_detections['locations'] = face_locations.copy()
+                        
+                        time.sleep(0.15)  # Processa detecção a cada 150ms (mais estável)
+                    except Exception as e:
+                        print(f"Erro no worker de detecção: {e}")
+                        time.sleep(0.5)
+            
+            # Inicia thread de detecção em paralelo
+            detection_thread = threading.Thread(target=face_detection_worker, daemon=True)
+            detection_thread.start()
             
             print(f"Streaming iniciado para câmera {camera_id}")
             
@@ -643,46 +694,86 @@ def stream_camera(camera_id, user_id):
                         cap = cv2.VideoCapture(source)
                         if isinstance(source, str) and source.startswith('http'):
                             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                            cap.set(cv2.CAP_PROP_FPS, 25)  # 25 FPS para reconexão HTTP
+                        else:
+                            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                         
                         if cap.isOpened():
                             cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
                             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-                            cap.set(cv2.CAP_PROP_FPS, 15)
+                            cap.set(cv2.CAP_PROP_FPS, 25)
                             consecutive_failures = 0
                             print(f"Reconexão bem-sucedida para câmera {camera_id}")
                         else:
                             print(f"Falha na reconexão da câmera {camera_id}")
                             break
                     
-                    time.sleep(0.3)
+                    time.sleep(0.1)  # Sleep reduzido para falhas
                     continue
                 
                 consecutive_failures = 0
                 
                 try:
-                    # Processa a cada 3 frames para manter boa detecção
-                    if frame_count % 3 == 0:
-                        processed_frame, face_names, face_ids = engine.process_frame(frame, camera_id)
-                        
-                        # Converte frame para base64
-                        _, buffer = cv2.imencode('.jpg', processed_frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
-                        frame_base64 = base64.b64encode(buffer).decode('utf-8')
-                        
-                        # Atualiza informações da câmera ativa
-                        if camera_id in active_cameras:
-                            active_cameras[camera_id]['last_update'] = datetime.utcnow()
-                            active_cameras[camera_id]['face_count'] = len(face_names)
-                        
-                        # Envia frame via Socket.IO
-                        socketio.emit('processed_frame', {
-                            'camera_id': camera_id,
-                            'image': frame_base64,
-                            'faces': face_names,
-                            'face_count': len(face_names)
-                        }, room=f"camera_{camera_id}")
+                    # Atualiza frame para thread de detecção
+                    with frame_lock:
+                        latest_frame = frame.copy()
+                        # Pega as últimas detecções disponíveis
+                        current_faces = latest_detections['faces'].copy()
+                        current_ids = latest_detections['ids'].copy()
+                        current_locations = latest_detections['locations'].copy()
+                    
+                    # SEMPRE envia o frame atual (stream contínua)
+                    # Mas desenha as detecções mais recentes sobre ele
+                    display_frame = frame.copy()
+                    
+                    # Se há detecções, desenha os contornos no frame atual
+                    if len(current_faces) > 0 and len(current_locations) > 0:
+                        # Desenha retângulos e nomes para cada rosto detectado
+                        for i, (name, location) in enumerate(zip(current_faces, current_locations)):
+                            if i < len(current_locations):
+                                top, right, bottom, left = location
+                                
+                                # Define cor baseada no nome: verde para conhecidos, vermelho para desconhecidos
+                                if name == "Desconhecido" or name.startswith("Desconhecido"):
+                                    color = (0, 0, 255)  # Vermelho para desconhecidos
+                                    confidence_text = "Novo"
+                                else:
+                                    color = (0, 255, 0)  # Verde para conhecidos
+                                    confidence_text = "Conhecido"
+                                
+                                # Desenha retângulo ao redor do rosto
+                                cv2.rectangle(display_frame, (left, top), (right, bottom), color, 2)
+                                
+                                # Desenha fundo para o texto
+                                cv2.rectangle(display_frame, (left, bottom - 35), (right, bottom), color, cv2.FILLED)
+                                
+                                # Desenha o nome
+                                font = cv2.FONT_HERSHEY_DUPLEX
+                                cv2.putText(display_frame, name, (left + 6, bottom - 6), font, 0.6, (255, 255, 255), 1)
+                                
+                                # Desenha status no canto superior da caixa
+                                cv2.rectangle(display_frame, (left, top - 20), (left + 80, top), color, cv2.FILLED)
+                                cv2.putText(display_frame, confidence_text, (left + 2, top - 5), font, 0.4, (255, 255, 255), 1)
+                    
+                    # Converte frame para base64 - frame com contornos
+                    _, buffer = cv2.imencode('.jpg', display_frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                    frame_base64 = base64.b64encode(buffer).decode('utf-8')
+                    
+                    # Atualiza informações da câmera ativa
+                    if camera_id in active_cameras:
+                        active_cameras[camera_id]['last_update'] = datetime.utcnow()
+                        active_cameras[camera_id]['face_count'] = len(current_faces)
+                    
+                    # Envia frame via Socket.IO com detecções mais recentes
+                    socketio.emit('processed_frame', {
+                        'camera_id': camera_id,
+                        'image': frame_base64,
+                        'faces': current_faces,
+                        'face_count': len(current_faces)
+                    }, room=f"camera_{camera_id}")
                     
                     frame_count += 1
-                    time.sleep(0.067)  # ~15 FPS
+                    time.sleep(0.025)  # ~40 FPS para máxima fluidez
                     
                 except Exception as e:
                     print(f"Erro no processamento do frame da câmera {camera_id}: {e}")
@@ -693,6 +784,11 @@ def stream_camera(camera_id, user_id):
         except Exception as e:
             print(f"Erro na thread de streaming da câmera {camera_id}: {e}")
         finally:
+            # Para thread de detecção
+            processing_active = False
+            if 'detection_thread' in locals():
+                detection_thread.join(timeout=1)
+            
             # Limpa recursos
             if cap:
                 cap.release()

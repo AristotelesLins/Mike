@@ -15,6 +15,7 @@ class FaceRecognitionEngine:
         self.known_face_names = []
         self.known_face_ids = []
         self.last_detection_times = {}  # Para evitar detecções duplicadas
+        self.last_face_locations = []  # Para armazenar localizações dos rostos
         self.lock = threading.Lock()  # Para thread safety
         if app:
             with app.app_context():
@@ -54,6 +55,19 @@ class FaceRecognitionEngine:
         face_locations = face_recognition.face_locations(rgb_small_frame, model="hog")
         face_encodings = face_recognition.face_encodings(rgb_small_frame, face_locations)
         
+        # Escala localizações de volta para tamanho original
+        scaled_locations = []
+        for top, right, bottom, left in face_locations:
+            scaled_locations.append((
+                int(top / scale_factor),
+                int(right / scale_factor), 
+                int(bottom / scale_factor),
+                int(left / scale_factor)
+            ))
+        
+        # Armazena localizações para uso em threads
+        self.last_face_locations = scaled_locations.copy()
+        
         face_names = []
         detected_face_ids = []
         
@@ -80,9 +94,7 @@ class FaceRecognitionEngine:
             face_names.append(name)
             detected_face_ids.append(face_id)
         
-        # Desenha as detecções no frame original
-        self.draw_detections(frame, face_locations, face_names, scale_factor)
-        
+        # Não desenha mais aqui - será feito no app.py para controle total das cores
         return frame, face_names, detected_face_ids
     
     def draw_detections(self, frame, face_locations, face_names, scale_factor):
