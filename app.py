@@ -37,6 +37,14 @@ login_manager.login_message_category = 'info'
 
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
+# Filtro personalizado para formatação de datas
+@app.template_filter('datetime')
+def datetime_filter(dt, format='%d/%m/%Y %H:%M'):
+    """Filtro para formatar datas no template"""
+    if dt is None:
+        return 'N/A'
+    return dt.strftime(format)
+
 # Dicionário para armazenar engines de reconhecimento por usuário
 face_engines = {}
 active_cameras = {}  # Dicionário para rastrear câmeras ativas
@@ -569,6 +577,29 @@ def cleanup_inactive_cameras():
                 del camera_threads[cam_id]
             print(f"Câmera {cam_id} removida por inatividade")
 
+def cleanup_old_sessions():
+    """Encerra sessões de detecção antigas (sem atividade por mais de 5 minutos)"""
+    with app.app_context():
+        try:
+            cutoff_time = datetime.utcnow() - timedelta(minutes=5)
+            
+            # Encontra sessões ativas antigas
+            old_sessions = Sighting.query.filter(
+                Sighting.session_end.is_(None),
+                Sighting.timestamp < cutoff_time
+            ).all()
+            
+            for session in old_sessions:
+                session.session_end = session.timestamp
+            
+            if old_sessions:
+                db.session.commit()
+                print(f"Encerrando {len(old_sessions)} sessões antigas")
+                
+        except Exception as e:
+            print(f"Erro ao encerrar sessões antigas: {e}")
+            db.session.rollback()
+
 def stream_camera(camera_id, user_id):
     """Thread function para streaming contínuo de uma câmera"""
     with app.app_context():  # IMPORTANTE: Contexto da aplicação para threads
@@ -801,10 +832,11 @@ def start_cleanup_thread():
         while True:
             time.sleep(120)  # 2 minutos
             cleanup_inactive_cameras()
+            cleanup_old_sessions()  # Limpa sessões antigas
     
     cleanup_thread = threading.Thread(target=cleanup_loop, daemon=True)
     cleanup_thread.start()
-    print("Thread de limpeza de câmeras iniciada")
+    print("Thread de limpeza de câmeras e sessões iniciada")
 
 # --- INICIALIZAÇÃO ---
 def create_tables():

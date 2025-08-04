@@ -75,7 +75,7 @@
                                                 <span class="badge bg-warning">Não identificado</span>
                                             {% endif %}
                                         </td>
-                                        <td>{{ moment(face.sightings[0].timestamp).format('DD/MM/YYYY HH:mm') if face.sightings else 'N/A' }}</td>
+                                        <td>{{ face.created_at|datetime if face.created_at else 'N/A' }}</td>
                                         <td>
                                             <span class="badge bg-info">{{ face.sightings|length }}</span>
                                         </td>

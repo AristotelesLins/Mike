@@ -88,8 +88,11 @@ class FaceRecognitionEngine:
                         name = self.known_face_names[best_match_index]
                         face_id = self.known_face_ids[best_match_index]
                         
-                        # Registra o avistamento (com throttling)
-                        self.register_sighting_throttled(face_id, camera_id, current_time)
+                        # Calcula confiança (1 - distância, normalizado para 0-1)
+                        confidence = max(0.0, 1.0 - face_distances[best_match_index])
+                        
+                        # Registra o avistamento com sessão inteligente
+                        self.register_sighting_with_session(face_id, camera_id, current_time, confidence)
             
             face_names.append(name)
             detected_face_ids.append(face_id)
@@ -129,18 +132,87 @@ class FaceRecognitionEngine:
             cv2.putText(frame, confidence_text, (left + 2, top - 5), font, 0.4, (255, 255, 255), 1)
     
     def register_sighting_throttled(self, face_id, camera_id, current_time):
-        """Registra um avistamento com throttling para evitar spam"""
-        key = f"{face_id}_{camera_id}"
+        """Registra um avistamento com sistema de sessões inteligente para evitar spam"""
+        # Registra o avistamento usando o novo sistema de sessões
+        self.register_sighting_with_session(face_id, camera_id, current_time)
+    
+    def register_sighting_with_session(self, face_id, camera_id, timestamp=None, confidence=0.95):
+        """Registra um avistamento usando sistema de sessões para evitar spam"""
+        from models import db
         
-        # Verifica se já foi detectado recentemente (últimos 60 segundos para reduzir carga)
-        if key in self.last_detection_times:
-            time_diff = current_time - self.last_detection_times[key]
-            if time_diff.total_seconds() < 60:
-                return  # Muito recente, ignora
+        def _register_with_session():
+            try:
+                current_timestamp = timestamp if timestamp is not None else datetime.utcnow()
+                
+                # Procura por uma sessão ativa (últimos 5 minutos sem session_end)
+                active_session = Sighting.query.filter(
+                    Sighting.face_id == face_id,
+                    Sighting.camera_id == camera_id,
+                    Sighting.session_end.is_(None),
+                    Sighting.session_start >= current_timestamp - timedelta(minutes=5)
+                ).first()
+                
+                if active_session:
+                    # Atualiza sessão existente
+                    active_session.detection_count += 1
+                    active_session.timestamp = current_timestamp  # Última detecção
+                    
+                    # Atualiza confiança média
+                    total_confidence = (active_session.confidence_avg * (active_session.detection_count - 1)) + confidence
+                    active_session.confidence_avg = total_confidence / active_session.detection_count
+                    
+                    # Se passou mais de 2 minutos desde a última detecção, encerra a sessão anterior
+                    if (current_timestamp - active_session.timestamp).total_seconds() > 120:
+                        active_session.session_end = active_session.timestamp
+                        
+                        # Cria nova sessão
+                        return self._create_new_session(face_id, camera_id, current_timestamp, confidence)
+                    
+                    db.session.commit()
+                    return True
+                else:
+                    # Cria nova sessão
+                    return self._create_new_session(face_id, camera_id, current_timestamp, confidence)
+                    
+            except Exception as e:
+                print(f"Erro ao registrar avistamento com sessão: {e}")
+                db.session.rollback()
+                return False
         
-        # Registra o avistamento
-        if self.register_sighting(face_id, camera_id, current_time):
-            self.last_detection_times[key] = current_time
+        if self.app:
+            with self.app.app_context():
+                return _register_with_session()
+        else:
+            return _register_with_session()
+    
+    def _create_new_session(self, face_id, camera_id, timestamp, confidence):
+        """Cria uma nova sessão de avistamento"""
+        from models import db
+        
+        try:
+            # Verifica se é um rosto conhecido ou desconhecido
+            face = KnownFace.query.get(face_id)
+            is_unknown = face and face.name.startswith('Desconhecido_')
+            
+            sighting = Sighting(
+                face_id=face_id,
+                camera_id=camera_id,
+                timestamp=timestamp,
+                session_start=timestamp,
+                session_end=None,  # Sessão ativa
+                detection_count=1,
+                confidence_avg=confidence,
+                is_unknown=is_unknown
+            )
+            
+            db.session.add(sighting)
+            db.session.commit()
+            return True
+            
+        except Exception as e:
+            print(f"Erro ao criar nova sessão: {e}")
+            db.session.rollback()
+            return False
     
     def create_unknown_face(self, face_encoding):
         """Cria um novo rosto desconhecido no banco"""

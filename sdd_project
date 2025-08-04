@@ -1,9 +1,17 @@
+-- ============================================================
+-- SCHEMA DO BANCO DE DADOS - SISTEMA DE RECONHECIMENTO FACIAL
+-- Versão: 2.0 (Atualizada)
+-- Data: 04/08/2025
+-- ============================================================
+
+-- Tabela de usuários do sistema
 CREATE TABLE users (
     id INT AUTO_INCREMENT PRIMARY KEY,
     username VARCHAR(80) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL
 );
 
+-- Tabela de estabelecimentos (cada usuário pode ter múltiplos estabelecimentos)
 CREATE TABLE establishments (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(120) NOT NULL,
@@ -11,6 +19,7 @@ CREATE TABLE establishments (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+-- Tabela de câmeras (cada estabelecimento pode ter múltiplas câmeras)
 CREATE TABLE cameras (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(120) NOT NULL,
@@ -19,19 +28,72 @@ CREATE TABLE cameras (
     FOREIGN KEY (establishment_id) REFERENCES establishments(id) ON DELETE CASCADE
 );
 
+-- Tabela de rostos conhecidos (com dados biométricos)
 CREATE TABLE known_faces (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(120) NOT NULL, -- 'Desconhecido_1', 'Desconhecido_2', etc. até ser nomeado
-    face_encoding BLOB NOT NULL,
+    face_encoding BLOB NOT NULL, -- Dados biométricos do rosto (encoding do face_recognition)
     user_id INT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP, -- Quando o rosto foi registrado
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+-- Tabela de avistamentos/detecções (registra quando e onde um rosto foi visto)
 CREATE TABLE sightings (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    face_id INT NOT NULL,
-    camera_id INT NOT NULL,
-    timestamp DATETIME NOT NULL,
+    face_id INT NOT NULL, -- Referência ao rosto detectado
+    camera_id INT NOT NULL, -- Câmera que fez a detecção
+    timestamp DATETIME NOT NULL, -- Momento da detecção
+    session_start DATETIME DEFAULT CURRENT_TIMESTAMP, -- Início da sessão de detecção
+    session_end DATETIME NULL, -- Fim da sessão (quando sai do campo de visão)
+    detection_count INT DEFAULT 1, -- Quantas vezes foi detectado na sessão
+    confidence_avg FLOAT DEFAULT 0, -- Confiança média das detecções
+    is_unknown TINYINT(1) DEFAULT 0, -- Flag para rostos desconhecidos
     FOREIGN KEY (face_id) REFERENCES known_faces(id) ON DELETE CASCADE,
     FOREIGN KEY (camera_id) REFERENCES cameras(id) ON DELETE CASCADE
 );
+
+-- ============================================================
+-- ÍNDICES PARA OTIMIZAÇÃO DE PERFORMANCE
+-- ============================================================
+
+-- Índice para buscar sightings por data/hora
+CREATE INDEX idx_sightings_timestamp ON sightings(timestamp);
+
+-- Índice para buscar sightings por face
+CREATE INDEX idx_sightings_face ON sightings(face_id);
+
+-- Índice para buscar sightings por câmera
+CREATE INDEX idx_sightings_camera ON sightings(camera_id);
+
+-- Índice para buscar rostos por usuário
+CREATE INDEX idx_faces_user ON known_faces(user_id);
+
+-- Índice para buscar estabelecimentos por usuário
+CREATE INDEX idx_establishments_user ON establishments(user_id);
+
+-- ============================================================
+-- COMENTÁRIOS SOBRE AS MELHORIAS NA VERSÃO 2.0
+-- ============================================================
+
+/*
+MELHORIAS IMPLEMENTADAS:
+
+1. TABELA known_faces:
+   - Adicionado 'created_at' para rastreamento temporal
+   
+2. TABELA sightings:
+   - Adicionado 'session_start' e 'session_end' para controle de sessões
+   - Adicionado 'detection_count' para contar detecções por sessão
+   - Adicionado 'confidence_avg' para métricas de qualidade
+   - Adicionado 'is_unknown' para distinguir rostos conhecidos/desconhecidos
+
+3. PERFORMANCE:
+   - Adicionados índices estratégicos para otimizar consultas
+
+4. FUNCIONALIDADES HABILITADAS:
+   - Sistema de sessões: detecta quando alguém "entra" e "sai" do campo de visão
+   - Métricas de qualidade: permite avaliar a confiabilidade das detecções
+   - Controle de rostos desconhecidos: facilita o processo de identificação
+   - Rastreamento temporal completo: histórico detalhado de todas as atividades
+*/

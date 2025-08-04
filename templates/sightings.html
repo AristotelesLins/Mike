@@ -17,6 +17,9 @@
                             <th>Pessoa</th>
                             <th>Câmera</th>
                             <th>Estabelecimento</th>
+                            <th>Sessão</th>
+                            <th>Detecções</th>
+                            <th>Confiança</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -33,6 +36,31 @@
                                 </td>
                                 <td>{{ camera.name }}</td>
                                 <td>{{ establishment.name }}</td>
+                                <td>
+                                    {% if sighting.session_end %}
+                                        <span class="badge bg-secondary">Finalizada</span>
+                                        <small class="text-muted d-block">
+                                            {{ sighting.session_start.strftime('%H:%M') }} - {{ sighting.session_end.strftime('%H:%M') }}
+                                        </small>
+                                    {% else %}
+                                        <span class="badge bg-success">Ativa</span>
+                                        <small class="text-muted d-block">
+                                            Desde {{ sighting.session_start.strftime('%H:%M') }}
+                                        </small>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <span class="badge bg-info">{{ sighting.detection_count }}</span>
+                                </td>
+                                <td>
+                                    {% if sighting.confidence_avg > 0 %}
+                                        <span class="badge bg-{% if sighting.confidence_avg >= 0.8 %}success{% elif sighting.confidence_avg >= 0.6 %}warning{% else %}danger{% endif %}">
+                                            {{ "%.0f"|format(sighting.confidence_avg * 100) }}%
+                                        </span>
+                                    {% else %}
+                                        <span class="text-muted">N/A</span>
+                                    {% endif %}
+                                </td>
                             </tr>
                         {% endfor %}
                     </tbody>

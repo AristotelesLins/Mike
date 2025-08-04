@@ -40,6 +40,7 @@ class KnownFace(db.Model):
     name = db.Column(db.String(120), nullable=False)
     face_encoding = db.Column(db.LargeBinary, nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     
     # Relacionamentos
     sightings = db.relationship('Sighting', backref='face', lazy=True, cascade='all, delete-orphan')
@@ -58,3 +59,8 @@ class Sighting(db.Model):
     face_id = db.Column(db.Integer, db.ForeignKey('known_faces.id'), nullable=False)
     camera_id = db.Column(db.Integer, db.ForeignKey('cameras.id'), nullable=False)
     timestamp = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    session_start = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    session_end = db.Column(db.DateTime, nullable=True)
+    detection_count = db.Column(db.Integer, nullable=False, default=1)
+    confidence_avg = db.Column(db.Float, nullable=False, default=0.0)
+    is_unknown = db.Column(db.Boolean, nullable=False, default=False)
