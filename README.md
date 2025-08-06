@@ -45,7 +45,7 @@ Sistema completo de reconhecimento facial desenvolvido em Python com Flask, Open
 ## 🛠️ Tecnologias Utilizadas
 
 ### **Backend**
-- **Python >3.8 <= 11.9** - Linguagem principal
+- **Python >3.8** - Linguagem principal
 - **Flask 2.3+** - Framework web
 - **Flask-SocketIO** - Comunicação em tempo real
 - **Flask-Login** - Autenticação de usuários
